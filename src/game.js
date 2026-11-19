@@ -950,7 +950,7 @@ const UI = {
       b.addEventListener('click', () => {
         g.tool = b.dataset.tool;
         g.selected = null;
-        document.querySelectorAll('[data-tool]').forEach((o) => o.setAttribute('aria-pressed', String(o === b)));
+        document.querySelectorAll('[data-tool]').forEach((o) => o.setAttribute('aria-pressed', String(o.dataset.tool === g.tool)));
       });
     });
     document.querySelectorAll('[data-scene]').forEach((b) => {
@@ -979,18 +979,19 @@ const UI = {
   bindUiOff() {
     const offBtn = document.getElementById('ui-off');
     const onBtn = document.getElementById('ui-on');
+    const mini = document.getElementById('mini'); // UIオフ中の小さな道具箱＋戻すボタン
     const de = document.documentElement;
     const standalone = () => matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone === true;
     let wentFull = false, sleepT = null;
     const wake = () => {
-      if (onBtn.hidden) return;
-      onBtn.classList.remove('sleep');
+      if (mini.hidden) return;
+      mini.classList.remove('sleep');
       clearTimeout(sleepT);
-      sleepT = setTimeout(() => onBtn.classList.add('sleep'), 2500);
+      sleepT = setTimeout(() => mini.classList.add('sleep'), 3000);
     };
     const set = (off) => {
       document.body.classList.toggle('ui-off', off);
-      onBtn.hidden = !off;
+      mini.hidden = !off;
       this.label.hidden = true;
       if (off) {
         this.hideHint();
@@ -1005,7 +1006,7 @@ const UI = {
         }
       } else {
         clearTimeout(sleepT);
-        onBtn.classList.remove('sleep');
+        mini.classList.remove('sleep');
         const exit = document.exitFullscreen || document.webkitExitFullscreen;
         if (wentFull && exit && (document.fullscreenElement || document.webkitFullscreenElement)) {
           try { const r = exit.call(document); if (r && r.catch) r.catch(() => {}); } catch (e) { /* noop */ }

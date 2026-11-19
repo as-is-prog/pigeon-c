@@ -324,18 +324,28 @@ body.ui-off .top,
 body.ui-off .tools,
 body.ui-off #hint,
 body.ui-off #toast { display: none !important; }
-#ui-on {
+#mini {
   position: fixed;
   right: max(10px, env(safe-area-inset-right, 0px));
   bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
   z-index: 7;
-  font-size: 13px;
-  padding: 4px 8px;
-  opacity: .55;
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  opacity: .7;
   transition: opacity .4s steps(4);
 }
-#ui-on:hover, #ui-on:focus-visible { opacity: 1; }
-#ui-on.sleep { opacity: 0; }
+#mini:hover, #mini:focus-within { opacity: 1; }
+#mini.sleep { opacity: 0; pointer-events: none; }
+#mini .mini-tools { display: flex; gap: 4px; padding: 4px; }
+#mini .mini-tools button {
+  width: 32px; height: 32px; padding: 0;
+  justify-content: center;
+  box-shadow: 1px 1px 0 var(--shadow);
+}
+#mini .mini-tools button:active { transform: translate(1px, 1px); }
+#mini .mini-tools .ico { width: 18px; height: 18px; }
+#ui-on { font-size: 13px; padding: 4px 8px; }
 
 @media (max-width: 560px) {
   .brand h1 { font-size: 17px; }
@@ -399,7 +409,15 @@ body.ui-off #toast { display: none !important; }
 
 <div id="hint" class="plate">地面をタップするとエサがまけます</div>
 <div id="toast" hidden></div>
-<button id="ui-on" hidden title="UIを表示（H キー）">UIを出す</button>
+<div id="mini" hidden>
+  <div class="mini-tools plate" role="group" aria-label="道具">
+    <button data-tool="look" aria-pressed="false" aria-label="観察" title="観察"><i class="ico look"></i></button>
+    <button data-tool="seed" aria-pressed="true" aria-label="エサをまく" title="エサをまく"><i class="ico seed"></i></button>
+    <button data-tool="bread" aria-pressed="false" aria-label="パンくず" title="パンくず"><i class="ico bread"></i></button>
+    <button data-tool="clap" aria-pressed="false" aria-label="手をたたく" title="手をたたく"><i class="ico clap"></i></button>
+  </div>
+  <button id="ui-on" title="UIを表示（H キー）">UIを出す</button>
+</div>
 
 <div id="zukan" hidden>
   <section class="book plate" role="dialog" aria-labelledby="zk-title">
