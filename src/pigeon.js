@@ -22,6 +22,7 @@ class Pigeon {
     this.x = x; this.y = y; this.z = z;
     this.vx = 0; this.vy = 0;
     this.dir = U.chance(0.5) ? 1 : -1;
+    this.dirAt = 0;
     this.male = U.chance(0.5);
     this.bold = this.kiji ? U.rand(0.15, 0.45) : U.rand(0.45, 1);
     this.greed = this.kiji ? U.rand(0.25, 0.55) : U.rand(0.6, 1);
@@ -67,7 +68,12 @@ class Pigeon {
     const nx = this.x + (dx / d) * s, ny = this.y + (dy / d) * s;
     if (!this.g.scene.walkable(nx, ny)) return true; // 行き止まり: 到着扱い
     this.x = nx; this.y = ny;
-    if (Math.abs(dx) > 0.3) this.dir = dx > 0 ? 1 : -1;
+    const nd = dx > 0 ? 1 : -1;
+    if (nd !== this.dir && d > 8 && Math.abs(dx) > 1.5 && Math.abs(dx) > d * 0.25 && this.age - this.dirAt > 0.3) {
+      this.dir = nd;
+      this.dirAt = this.age;
+    }
+    // 数px の位置合わせは振り向かずに足踏み・後ずさりで済ませる（上の d > 8）
     // 首振り: 頭を空間に固定 → 一気に前へ
     const stride = this.kiji ? 2.6 : 2.3;
     this.stepPh += s / stride;
@@ -92,6 +98,7 @@ class Pigeon {
     const leaf = g.nearestLeaf(this.x, this.y, 40);
     if (leaf && r < 0.14) {
       this.target = leaf;
+      this.leafSide = this.x < leaf.x ? -1 : 1; // 鳩がいる側から近づく（途中で変えない）
       return this.set('leaf', 6);
     }
     if (r < 0.48) {
@@ -242,7 +249,10 @@ class Pigeon {
     this.vy += ((d ? (dy / d) * want : 0) - this.vy) * k;
     this.x += this.vx * dt;
     this.y += this.vy * dt;
-    if (Math.abs(this.vx) > 4) this.dir = this.vx > 0 ? 1 : -1;
+    if (Math.abs(this.vx) > 10 && (this.vx > 0 ? 1 : -1) !== this.dir && this.age - this.dirAt > 0.3) {
+      this.dir = this.vx > 0 ? 1 : -1;
+      this.dirAt = this.age;
+    }
     // 高度
     const landing = f.mode !== 'flock' && !f.out;
     let wantZ = f.alt;
@@ -341,11 +351,11 @@ class Pigeon {
       case 'leaf': {
         const lf = this.target;
         if (!lf || !g.leaves.includes(lf)) { this.think(); break; }
-        const ox = lf.x - this.dir * 7, oy = lf.y;
+        const ox = lf.x + (this.leafSide || -1) * 7, oy = lf.y;
         if (this.sub === 0) {
           if (this.stepToward(ox, oy, this.walkSpeed, dt) || U.dist(this.x, this.y, ox, oy) < 1.5) {
             this.sub = 1; this.st = 0; this.n = U.randi(2, 5);
-            this.dir = lf.x > this.x ? 1 : -1;
+            this.dir = -(this.leafSide || -1);
           }
           if (this.st > 6) this.think();
         } else {
@@ -378,7 +388,7 @@ class Pigeon {
           if (this.sub !== Math.floor(this.st / 2.4) + 1) { this.sub = Math.floor(this.st / 2.4) + 1; g.sfx.coo(this.kiji); }
         } else if (cyc < 1.7) {
           this.pose = 'coo:1:0';
-          this.dir = Math.floor(cyc * 8) % 2 ? 1 : -1;
+          this.dir = Math.floor((cyc - 1.1) * 5) % 2 ? 1 : -1;
         } else {
           this.pose = 'coo:1:0';
           const d = U.dist(tg.x, tg.y, this.x, this.y);
@@ -415,7 +425,13 @@ class Pigeon {
           break;
         }
         const sp = this.walkSpeed * (1.9 + this.greed * 0.8);
-        const d = U.dist(f.x, f.y, this.x + this.dir * 7, this.y);
+        // どちら側から嘴を出すかは、餌が変わったときと遠いときだけ決め直す
+        if (this.foodRef !== f || Math.abs(this.x - f.x) > 14) {
+          this.foodRef = f;
+          this.foodSide = this.x < f.x ? -1 : 1;
+        }
+        const tx = f.x + this.foodSide * 7;
+        const d = U.dist(tx, f.y, this.x, this.y);
         if (f.carrier && f.carrier !== this && d < 4 && U.chance(dt * 1.5)) {
           // 横取り
           const victim = f.carrier;
@@ -426,15 +442,12 @@ class Pigeon {
           break;
         }
         if (d < 2.2 && !f.carrier) {
-          this.dir = f.x >= this.x ? 1 : -1;
+          this.dir = -this.foodSide;
           this.set('peckfood', 0);
           break;
         }
-        // 嘴の先が餌に来る位置へ
-        const tx = f.x - (f.x >= this.x ? 7 : -7);
         if (this.stepToward(tx, f.y, sp, dt) && d >= 2.2) {
-          // 着いたけど届かない
-          this.dir = f.x >= this.x ? 1 : -1;
+          // 着いたけど届かない: そのまま寄せる
           this.x += (tx - this.x) * 0.5;
           this.y += (f.y - this.y) * 0.5;
         }
@@ -456,7 +469,6 @@ class Pigeon {
             if (f.type === 'bread' && f.hp > 1 && U.chance(0.32)) {
               f.carrier = this;
               this.set('carry', U.rand(0.8, 1.8));
-              this.dir = U.chance(0.5) ? 1 : -1;
               break;
             }
             g.eat(f, this);
