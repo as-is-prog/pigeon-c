@@ -91,9 +91,11 @@ button[aria-pressed="true"] .ico { filter: none; }
   justify-content: space-between;
   align-items: flex-start;
   gap: 10px;
+  flex-wrap: wrap;
   pointer-events: none;
   z-index: 5;
 }
+.top .hud { margin-left: auto; }
 .top > * { pointer-events: auto; }
 .brand {
   display: flex;
@@ -127,12 +129,33 @@ button[aria-pressed="true"] .ico { filter: none; }
   justify-content: flex-end;
 }
 .count {
-  padding: 4px 10px;
+  padding: 4px 8px 4px 10px;
   display: flex;
   align-items: baseline;
-  gap: 4px;
+  gap: 8px;
   font-size: 13px;
 }
+.count, .count span { white-space: nowrap; }
+.count .now { display: flex; align-items: baseline; gap: 4px; }
+.cap-ctl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 2px dotted var(--ink-soft);
+  align-self: center;
+}
+.cap-txt { display: flex; align-items: baseline; gap: 3px; color: var(--ink-soft); }
+.cap-txt b { font-size: 16px !important; color: var(--ink); min-width: 2ch; }
+button.step {
+  width: 24px; height: 24px; padding: 0;
+  justify-content: center;
+  font-size: 16px;
+  box-shadow: 1px 1px 0 var(--shadow);
+}
+button.step:active { transform: translate(1px, 1px); }
+button:disabled { opacity: .35; cursor: default; }
+button:disabled:active { transform: none; box-shadow: 1px 1px 0 var(--shadow); }
 .count b {
   font-size: 22px;
   font-weight: 400;
@@ -274,6 +297,12 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
   .tools button { font-size: 13px; padding: 6px 8px; justify-content: center; }
   .hud button { font-size: 13px; padding: 4px 8px; }
   .count b { font-size: 18px; }
+  .count { gap: 6px; padding: 3px 6px 3px 8px; }
+  #toast { top: calc(env(safe-area-inset-top, 0px) + 140px); font-size: 13px; }
+  .count .now > span:first-child { display: none; }
+  .cap-ctl { padding-left: 6px; gap: 3px; }
+  .cap-txt { font-size: 12px; }
+  button.step { width: 22px; height: 22px; }
   #zk-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); padding: 10px; gap: 8px; }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -300,7 +329,14 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
     </div>
   </div>
   <div class="hud">
-    <div class="count plate" aria-live="off"><span>いま</span><b id="count">0</b><span>羽</span></div>
+    <div class="count plate" role="group" aria-label="鳩の数">
+      <span class="now"><span>いま</span><b id="count">0</b><span>羽</span></span>
+      <span class="cap-ctl">
+        <button id="pop-dec" class="step" aria-label="上限を減らす" title="上限を減らす（多いぶんは飛び去ります）">−</button>
+        <span class="cap-txt">上限<b id="cap">25</b></span>
+        <button id="pop-inc" class="step" aria-label="上限を増やす" title="上限を増やす">＋</button>
+      </span>
+    </div>
     <button id="zk-open" title="これまでに見た羽色">図鑑 <span id="zk-count">0/15</span></button>
     <button id="sound" aria-pressed="false" title="羽音と鳴き声"><span>音なし</span></button>
   </div>
