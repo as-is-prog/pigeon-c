@@ -3,6 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--PWA-->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#6a9149">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ハトだまり">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<!--PWA-END-->
 <!--BUILD:HEAD-->
 <title>ハトだまり</title>
 <meta name="claude:viewport-fit-sides" content="cover">
@@ -309,6 +319,24 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
 .card.unseen { background: var(--paper-2); }
 .card.unseen .nm { color: var(--ink-soft); letter-spacing: .2em; }
 
+/* UIオフ: 箱庭だけを見る。右下の小さな札で戻す */
+body.ui-off .top,
+body.ui-off .tools,
+body.ui-off #hint,
+body.ui-off #toast { display: none !important; }
+#ui-on {
+  position: fixed;
+  right: max(10px, env(safe-area-inset-right, 0px));
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
+  z-index: 7;
+  font-size: 13px;
+  padding: 4px 8px;
+  opacity: .55;
+  transition: opacity .4s steps(4);
+}
+#ui-on:hover, #ui-on:focus-visible { opacity: 1; }
+#ui-on.sleep { opacity: 0; }
+
 @media (max-width: 560px) {
   .brand h1 { font-size: 17px; }
   .scenes button { font-size: 13px; padding: 3px 6px; }
@@ -358,6 +386,7 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
     </div>
     <button id="zk-open" title="これまでに見た羽色">図鑑 <span id="zk-count">0/15</span></button>
     <button id="sound" aria-pressed="false" title="羽音と鳴き声"><span>音なし</span></button>
+    <button id="ui-off" title="UIを隠して箱庭だけを見る（H キー）">UIオフ</button>
   </div>
 </div>
 
@@ -370,6 +399,7 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
 
 <div id="hint" class="plate">地面をタップするとエサがまけます</div>
 <div id="toast" hidden></div>
+<button id="ui-on" hidden title="UIを表示（H キー）">UIを出す</button>
 
 <div id="zukan" hidden>
   <section class="book plate" role="dialog" aria-labelledby="zk-title">
@@ -393,5 +423,12 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
 <script src="src/game.js"></script>
 <!--BUILD:SCRIPTS-END-->
 <!--BUILD:BODY-END-->
+<!--PWA-->
+<script>
+if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+}
+</script>
+<!--PWA-END-->
 </body>
 </html>

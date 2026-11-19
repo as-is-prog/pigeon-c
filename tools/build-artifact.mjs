@@ -13,6 +13,8 @@ if (!out) {
   process.exit(1);
 }
 let html = readFileSync(join(root, 'index.html'), 'utf8');
+// ホーム画面追加用（manifest・アイコン・Service Worker）は別ファイル前提なので1枚版では外す
+html = html.replace(/<!--PWA-->[\s\S]*?<!--PWA-END-->\n?/g, '');
 html = html.replace(/<!--BUILD:SCRIPTS-->([\s\S]*?)<!--BUILD:SCRIPTS-END-->/, (_, block) => {
   const srcs = [...block.matchAll(/<script src="([^"]+)"><\/script>/g)].map((m) => m[1]);
   const code = srcs.map((s) => `// ---- ${s} ----\n` + readFileSync(join(root, s), 'utf8')).join('\n');
