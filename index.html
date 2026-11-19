@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!--BUILD:HEAD-->
+<title>ハトだまり</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap">
+<style>
+/* レイアウト: 画面いっぱいの箱庭。上に場所の札、下に道具箱、右上に数と図鑑。
+   ゲームの見た目は一つの世界に固定（ライト/ダーク切替なし）。 */
+:root {
+  --paper: #f3ead6;
+  --paper-2: #e6d9bd;
+  --ink: #2c2732;
+  --ink-soft: #5d5466;
+  --neck-g: #3e8c6d;
+  --neck-p: #7b4f8b;
+  --eye: #d4582a;
+  --shadow: #2c2732;
+  --ground: #6a9149;
+  --font-pixel: "DotGothic16", "IPAGothic", "Hiragino Kaku Gothic ProN", "Yu Gothic", monospace;
+  color-scheme: light;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-pixel);
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+#stage {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--ground);
+}
+#game {
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  touch-action: manipulation;
+  cursor: crosshair;
+  transition: opacity .22s steps(4);
+}
+#game.fade { opacity: 0; }
+
+/* 共通: ドットっぽい札 */
+.plate {
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--shadow);
+}
+button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--shadow);
+  padding: 6px 10px;
+  cursor: pointer;
+  line-height: 1.1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+button:hover { background: #fff7e6; }
+button:active { transform: translate(2px, 2px); box-shadow: 0 0 0 var(--shadow); }
+button:focus-visible { outline: 3px solid var(--eye); outline-offset: 2px; }
+button[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--paper);
+}
+button[aria-pressed="true"] .ico { filter: none; }
+
+.top {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: max(12px, env(safe-area-inset-left, 0px));
+  right: max(12px, env(safe-area-inset-right, 0px));
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  pointer-events: none;
+  z-index: 5;
+}
+.top .hud { margin-left: auto; }
+.top > * { pointer-events: auto; }
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 10px;
+  flex-wrap: wrap;
+}
+.brand h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 400;
+  letter-spacing: .08em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.brand h1 i {
+  width: 10px; height: 10px; display: inline-block;
+  background: linear-gradient(90deg, var(--neck-g) 50%, var(--neck-p) 50%);
+  border: 2px solid var(--ink);
+}
+.scenes { display: flex; gap: 6px; }
+.scenes button { padding: 4px 8px; font-size: 14px; }
+
+.hud {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.count {
+  padding: 4px 8px 4px 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 13px;
+}
+.count, .count span { white-space: nowrap; }
+.count .now { display: flex; align-items: baseline; gap: 4px; }
+.cap-ctl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  border-left: 2px dotted var(--ink-soft);
+  align-self: center;
+}
+.cap-txt { display: flex; align-items: baseline; gap: 3px; color: var(--ink-soft); }
+.cap-txt input {
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px dotted var(--ink-soft);
+  padding: 0 1px;
+  margin: 0;
+  min-width: 2ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.cap-txt input::-webkit-outer-spin-button,
+.cap-txt input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cap-txt input { user-select: text; -webkit-user-select: text; }
+button.step { touch-action: manipulation; }
+.cap-txt input:focus { outline: none; background: #fff7e6; border-bottom-color: var(--eye); }
+button.step {
+  width: 24px; height: 24px; padding: 0;
+  justify-content: center;
+  font-size: 16px;
+  box-shadow: 1px 1px 0 var(--shadow);
+}
+button.step:active { transform: translate(1px, 1px); }
+button:disabled { opacity: .35; cursor: default; }
+button:disabled:active { transform: none; box-shadow: 1px 1px 0 var(--shadow); }
+.count b {
+  font-size: 22px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  min-width: 2ch;
+  text-align: right;
+}
+
+.tools {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  transform: translateX(-50%);
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  z-index: 5;
+  max-width: calc(100vw - 24px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.tools button { font-size: 15px; padding: 7px 10px; }
+.ico {
+  width: 14px; height: 14px; display: inline-block; image-rendering: pixelated;
+  background-size: 100% 100%;
+}
+.ico.seed { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Crect x='1' y='1' width='2' height='2' fill='%23e3c35a'/%3E%3Crect x='4' y='2' width='2' height='2' fill='%23b5643a'/%3E%3Crect x='2' y='4' width='2' height='2' fill='%23c99a4a'/%3E%3Crect x='5' y='5' width='1' height='1' fill='%23efe2b0'/%3E%3C/svg%3E"); }
+.ico.bread { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Crect x='1' y='2' width='5' height='4' fill='%23b8864a'/%3E%3Crect x='2' y='1' width='3' height='4' fill='%23ecd6a4'/%3E%3C/svg%3E"); }
+.ico.clap { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Crect x='2' y='2' width='3' height='4' fill='%23f1c9a5'/%3E%3Crect x='1' y='3' width='1' height='2' fill='%23f1c9a5'/%3E%3Crect x='0' y='0' width='1' height='1' fill='%23d4582a'/%3E%3Crect x='6' y='0' width='1' height='1' fill='%23d4582a'/%3E%3Crect x='3' y='0' width='1' height='1' fill='%23d4582a'/%3E%3C/svg%3E"); }
+.ico.look { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Crect x='1' y='1' width='4' height='4' fill='none' stroke='%232c2732' stroke-width='1'/%3E%3Crect x='5' y='5' width='2' height='2' fill='%232c2732'/%3E%3C/svg%3E"); }
+button[aria-pressed="true"] .ico.look { filter: invert(1); }
+
+#label {
+  position: absolute;
+  left: 0; top: 0;
+  padding: 3px 7px;
+  font-size: 13px;
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--shadow);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 4;
+}
+#hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 70px);
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  font-size: 14px;
+  z-index: 4;
+  pointer-events: none;
+  max-width: calc(100vw - 40px);
+  text-align: center;
+  animation: bob 1.2s steps(2) infinite;
+}
+@keyframes bob { 50% { transform: translate(-50%, -3px); } }
+#toast {
+  position: fixed;
+  left: 50%;
+  top: calc(env(safe-area-inset-top, 0px) + 70px);
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  font-size: 15px;
+  z-index: 6;
+  pointer-events: none;
+  background: var(--ink);
+  color: var(--paper);
+  border: 2px solid var(--paper);
+  box-shadow: 3px 3px 0 rgba(0,0,0,.35);
+  white-space: nowrap;
+}
+#toast.show { animation: pop .35s steps(3); }
+@keyframes pop { from { transform: translate(-50%, -12px); opacity: 0; } }
+
+/* 図鑑 */
+#zukan {
+  position: fixed;
+  inset: 0;
+  background: rgba(30, 26, 36, .55);
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: calc(env(safe-area-inset-top, 0px) + 16px) max(16px, env(safe-area-inset-right, 0px)) calc(env(safe-area-inset-bottom, 0px) + 16px) max(16px, env(safe-area-inset-left, 0px));
+}
+.book {
+  width: min(920px, 100%);
+  max-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+}
+.book header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--ink);
+  background: var(--paper-2);
+}
+.book h2 { margin: 0; font-size: 20px; font-weight: 400; letter-spacing: .06em; }
+.book header p { margin: 2px 0 0; font-size: 12px; color: var(--ink-soft); }
+#zk-grid {
+  overflow-y: auto;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+.card {
+  border: 2px solid var(--ink);
+  background: #fbf5e6;
+  padding: 8px 10px 10px;
+  display: grid;
+  grid-template-rows: auto auto auto 1fr auto;
+  gap: 4px;
+  min-width: 0;
+}
+.card canvas {
+  width: 102px; height: 96px;
+  image-rendering: pixelated;
+  justify-self: center;
+  background: repeating-linear-gradient(0deg, transparent 0 4px, rgba(44,39,50,.04) 4px 5px);
+}
+.card .no { font-size: 11px; color: var(--ink-soft); letter-spacing: .1em; }
+.card .nm { font-size: 16px; }
+.card .ds { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-soft); }
+.card .ct { font-size: 11px; color: var(--neck-g); }
+.card.unseen { background: var(--paper-2); }
+.card.unseen .nm { color: var(--ink-soft); letter-spacing: .2em; }
+
+@media (max-width: 560px) {
+  .brand h1 { font-size: 17px; }
+  .scenes button { font-size: 13px; padding: 3px 6px; }
+  .tools { display: grid; grid-template-columns: 1fr 1fr; width: min(320px, calc(100vw - 32px)); }
+  .tools button { font-size: 13px; padding: 6px 8px; justify-content: center; }
+  .hud button { font-size: 13px; padding: 4px 8px; }
+  .count b { font-size: 18px; }
+  .count { gap: 6px; padding: 3px 6px 3px 8px; }
+  #toast { top: calc(env(safe-area-inset-top, 0px) + 140px); font-size: 13px; }
+  .count .now > span:first-child { display: none; }
+  .cap-ctl { padding-left: 6px; gap: 3px; }
+  .cap-txt { font-size: 12px; }
+  button.step { width: 22px; height: 22px; }
+  #zk-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); padding: 10px; gap: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #hint { animation: none; }
+  #toast.show { animation: none; }
+}
+</style>
+<!--BUILD:HEAD-END-->
+</head>
+<body>
+<!--BUILD:BODY-->
+<div id="stage">
+  <canvas id="game" aria-label="鳩がいる箱庭。タップすると選んだ道具を使います"></canvas>
+  <div id="label" hidden></div>
+</div>
+
+<div class="top">
+  <div class="brand plate">
+    <h1><i aria-hidden="true"></i>ハトだまり</h1>
+    <div class="scenes" role="group" aria-label="場所">
+      <button data-scene="park" aria-pressed="true">公園</button>
+      <button data-scene="street" aria-pressed="false">路上</button>
+      <button data-scene="river" aria-pressed="false">川沿い</button>
+    </div>
+  </div>
+  <div class="hud">
+    <div class="count plate" role="group" aria-label="鳩の数">
+      <span class="now"><span>いま</span><b id="count">0</b><span>羽</span></span>
+      <span class="cap-ctl">
+        <button id="pop-dec" class="step" aria-label="上限を減らす" title="上限を減らす（多いぶんは飛び去ります）">−</button>
+        <label class="cap-txt" for="cap">上限<input id="cap" type="number" inputmode="numeric" min="1" max="1000" step="1" value="25" title="タップして数字を入力（1〜1000）"></label>
+        <button id="pop-inc" class="step" aria-label="上限を増やす" title="上限を増やす">＋</button>
+      </span>
+    </div>
+    <button id="zk-open" title="これまでに見た羽色">図鑑 <span id="zk-count">0/15</span></button>
+    <button id="sound" aria-pressed="false" title="羽音と鳴き声"><span>音なし</span></button>
+  </div>
+</div>
+
+<div class="tools plate" role="group" aria-label="道具">
+  <button data-tool="look" aria-pressed="false"><i class="ico look"></i>観察</button>
+  <button data-tool="seed" aria-pressed="true"><i class="ico seed"></i>エサをまく</button>
+  <button data-tool="bread" aria-pressed="false"><i class="ico bread"></i>パンくず</button>
+  <button data-tool="clap" aria-pressed="false"><i class="ico clap"></i>手をたたく</button>
+</div>
+
+<div id="hint" class="plate">地面をタップするとエサがまけます</div>
+<div id="toast" hidden></div>
+
+<div id="zukan" hidden>
+  <section class="book plate" role="dialog" aria-labelledby="zk-title">
+    <header>
+      <div>
+        <h2 id="zk-title">ハト図鑑</h2>
+        <p>ドバト13色＋キジバト2種。羽色ごとに、これまで見かけた数を数えています。</p>
+      </div>
+      <button id="zk-close">閉じる</button>
+    </header>
+    <div id="zk-grid"></div>
+  </section>
+</div>
+
+<!--BUILD:SCRIPTS-->
+<script src="src/util.js"></script>
+<script src="src/variants.js"></script>
+<script src="src/sprites.js"></script>
+<script src="src/scenes.js"></script>
+<script src="src/pigeon.js"></script>
+<script src="src/game.js"></script>
+<!--BUILD:SCRIPTS-END-->
+<!--BUILD:BODY-END-->
+</body>
+</html>
