@@ -16,9 +16,11 @@ class Pigeon {
     this.v = variant;
     this.kiji = variant.species === 'kiji';
     this.id = ++BIRD_SEQ;
-    this.seed = U.randi(1, 1e9);
-    this.marks = makeMarkings(variant, this.seed);
-    this.cache = new Map();
+    // 見た目は羽色ごとに12通りの個体差から選ぶ（何百羽いてもスプライトを共有できるように）
+    const look = getLook(variant, U.randi(0, LOOKS_PER_VARIANT - 1));
+    this.seed = look.seed;
+    this.marks = look.marks;
+    this.cache = look.cache;
     this.x = x; this.y = y; this.z = z;
     this.vx = 0; this.vy = 0;
     this.dir = U.chance(0.5) ? 1 : -1;
@@ -88,7 +90,7 @@ class Pigeon {
   // ---- 行動の選択 ----
   think() {
     const g = this.g;
-    if (this.age > this.life && U.chance(0.5)) return this.takeoff('leave');
+    if (this.age > this.life && g.mayLeave && U.chance(0.5)) return this.takeoff('leave');
     // 餌
     if (g.foods.length && U.chance(0.4 + this.greed * 0.6)) {
       const f = this.findFood(150 + this.greed * 80);
@@ -228,7 +230,7 @@ class Pigeon {
       if (g.t > fl.until) {
         // 群れ解散 → めいめい着地、何羽かは止まり木や遠くへ
         const r = Math.random();
-        if (r < 0.12) return this.takeoff('leave');
+        if (r < 0.12 && g.mayLeave) return this.takeoff('leave');
         if (r < 0.3 && g.scene.perches.length) return this.takeoff('perch');
         const spot = fl.landNear ? g.groundNear(fl.landNear.x, fl.landNear.y, 45) : g.randomGround(true);
         this.fly.mode = 'land';
@@ -530,7 +532,7 @@ class Pigeon {
           if (f) {
             this.food = f; f.claim++;
             this.takeoff('land', { x: f.x + U.rand(-12, 12), y: f.y + U.rand(-6, 6), alt: this.z + 4 });
-          } else if (U.chance(0.25)) this.takeoff('leave');
+          } else if (g.mayLeave && U.chance(0.25)) this.takeoff('leave');
           else {
             const s = g.randomGround(true);
             this.takeoff('land', { x: s.x, y: s.y, alt: this.z + 6 });
@@ -577,7 +579,7 @@ class Pigeon {
   panicTakeoff() {
     const g = this.g;
     this.calm = 2;
-    const leaveP = this.kiji ? 0.6 : 0.22;
+    const leaveP = !g.mayLeave ? 0 : this.kiji ? 0.6 : 0.22;
     if (U.chance(leaveP)) this.takeoff('leave');
     else if (U.chance(0.15) && g.scene.perches.length) this.takeoff('perch');
     else this.takeoff('flock', { flock: g.getFlock(this) });

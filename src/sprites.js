@@ -457,7 +457,21 @@ function renderPigeon(variant, marks, key) {
   return cv;
 }
 
-// 個体のスプライトキャッシュ
+// 見た目（模様＋スプライトキャッシュ）の共有プール
+const LOOKS_PER_VARIANT = 12;
+const LOOKS = new Map();
+function getLook(variant, idx) {
+  const k = variant.id + ':' + idx;
+  let l = LOOKS.get(k);
+  if (!l) {
+    const seed = 1 + VARIANTS.indexOf(variant) * 7919 + idx * 104729;
+    l = { seed, marks: makeMarkings(variant, seed), cache: new Map() };
+    LOOKS.set(k, l);
+  }
+  return l;
+}
+
+// スプライトキャッシュ（同じ見た目の個体で共有）
 function getPigeonSprite(bird, key) {
   let s = bird.cache.get(key);
   if (!s) {

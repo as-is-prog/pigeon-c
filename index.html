@@ -146,7 +146,26 @@ button[aria-pressed="true"] .ico { filter: none; }
   align-self: center;
 }
 .cap-txt { display: flex; align-items: baseline; gap: 3px; color: var(--ink-soft); }
-.cap-txt b { font-size: 16px !important; color: var(--ink); min-width: 2ch; }
+.cap-txt input {
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px dotted var(--ink-soft);
+  padding: 0 1px;
+  margin: 0;
+  min-width: 2ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.cap-txt input::-webkit-outer-spin-button,
+.cap-txt input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.cap-txt input { user-select: text; -webkit-user-select: text; }
+button.step { touch-action: manipulation; }
+.cap-txt input:focus { outline: none; background: #fff7e6; border-bottom-color: var(--eye); }
 button.step {
   width: 24px; height: 24px; padding: 0;
   justify-content: center;
@@ -333,7 +352,7 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
       <span class="now"><span>いま</span><b id="count">0</b><span>羽</span></span>
       <span class="cap-ctl">
         <button id="pop-dec" class="step" aria-label="上限を減らす" title="上限を減らす（多いぶんは飛び去ります）">−</button>
-        <span class="cap-txt">上限<b id="cap">25</b></span>
+        <label class="cap-txt" for="cap">上限<input id="cap" type="number" inputmode="numeric" min="1" max="1000" step="1" value="25" title="タップして数字を入力（1〜1000）"></label>
         <button id="pop-inc" class="step" aria-label="上限を増やす" title="上限を増やす">＋</button>
       </span>
     </div>

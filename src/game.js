@@ -131,7 +131,9 @@ const STORE = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* 保存できなくても遊べる */ } },
 };
 
-const CAP_STEPS = [5, 8, 12, 16, 20, 25, 30, 40, 50];
+// −／＋ で動く段階。大きいほど刻みが粗い。直接入力なら 1〜1000 の任意の数
+const CAP_MIN = 1, CAP_MAX = 1000;
+const CAP_STEPS = [1, 2, 3, 5, 8, 10, 12, 15, 20, 25, 30, 40, 50, 60, 80, 100, 150, 200, 300, 400, 500, 700, 1000];
 
 const GRAIN = ['#e3c35a', '#d8b46a', '#c99a4a', '#efe2b0', '#b5643a', '#e8d48a', '#9a7a4a'].map(U.hex);
 
@@ -142,7 +144,8 @@ const G = {
   seen: STORE.get('hatodamari.seen', {}),
   sfx: SFX,
   nextEvent: 8, nextPanic: 45, nextSpawn: 1, nextLeaf: 1, flapCount: 0,
-  userCap: CAP_STEPS.includes(STORE.get('hatodamari.cap', 0)) ? STORE.get('hatodamari.cap', 0) : 0,
+  userCap: (() => { const v = Math.round(Number(STORE.get('hatodamari.cap', 0))); return v >= CAP_MIN && v <= CAP_MAX ? v : 0; })(),
+  seenDirty: false,
 
   init() {
     this.cv = document.getElementById('game');
@@ -205,6 +208,7 @@ const G = {
   // 画面の広さから決めるおすすめ上限（利用者が変えていなければこれを使う）
   get autoCap() {
     const want = U.clamp(Math.round((this.W * this.H) / 3500), 10, 30);
+    // おすすめ値は段階の中から選ぶ
     return CAP_STEPS.reduce((a, b) => (Math.abs(b - want) < Math.abs(a - want) ? b : a));
   },
   get cap() {
@@ -212,7 +216,11 @@ const G = {
   },
   // ふだん居つく数。エサをまいたときだけ上限まで集まる
   get targetPop() {
-    return Math.max(3, Math.round(this.cap * 0.7));
+    return this.cap <= 3 ? this.cap : Math.round(this.cap * 0.7);
+  },
+  // 少ないときは勝手に帰らない（1羽を愛でる用）
+  get mayLeave() {
+    return this.cap > 5;
   },
   // 飛び去り中を除いた数
   get resident() {
@@ -220,14 +228,20 @@ const G = {
     for (const b of this.birds) if (!(b.fly && b.fly.out)) n++;
     return n;
   },
-  setCap(dir) {
+  // 段階を一つ上げ下げ
+  stepCap(dir) {
     const cur = this.cap;
-    let i = CAP_STEPS.indexOf(cur);
-    if (i < 0) i = CAP_STEPS.findIndex((v) => v >= cur);
-    i = U.clamp(i + dir, 0, CAP_STEPS.length - 1);
-    this.userCap = CAP_STEPS[i];
-    STORE.set('hatodamari.cap', this.userCap);
-    if (dir > 0) this.nextSpawn = this.t + 0.3;
+    const next = dir > 0 ? CAP_STEPS.find((v) => v > cur) : [...CAP_STEPS].reverse().find((v) => v < cur);
+    if (next !== undefined) this.setCapValue(next);
+  },
+  setCapValue(n) {
+    n = Math.round(Number(n));
+    if (!Number.isFinite(n)) { UI.updateCap(); return; }
+    n = U.clamp(n, CAP_MIN, CAP_MAX);
+    const up = n > this.cap;
+    this.userCap = n;
+    STORE.set('hatodamari.cap', n);
+    if (up) this.nextSpawn = this.t + 0.3;
     UI.updateCap();
   },
 
@@ -237,7 +251,8 @@ const G = {
   },
 
   populate() {
-    const n = Math.max(2, Math.round(this.targetPop * 0.85) - 2);
+    const perchN = this.targetPop >= 8 && this.scene.perches.length ? 2 : 0;
+    const n = Math.max(1, Math.round(this.targetPop * 0.85)) - perchN;
     for (let i = 0; i < n; i++) {
       const s = this.randomGround(true);
       const b = this.addBird(this.pickVariant(), s.x, s.y, 0, true);
@@ -249,7 +264,7 @@ const G = {
       else b.set('idle', U.rand(0.2, 3));
     }
     // 止まり木にも何羽か
-    for (let i = 0; i < 2 && this.scene.perches.length; i++) {
+    for (let i = 0; i < perchN; i++) {
       const p = U.pick(this.scene.perches);
       const px = U.rand(p.x1, p.x2);
       const sy = p.syFn ? p.syFn(px) : p.sy;
@@ -269,7 +284,7 @@ const G = {
   markSeen(v, silent) {
     const first = !this.seen[v.id];
     this.seen[v.id] = (this.seen[v.id] || 0) + 1;
-    STORE.set('hatodamari.seen', this.seen);
+    this.seenDirty = true; // 保存はまとめて（何百羽も湧くときに毎回書かない）
     if (first && !silent) UI.toast(`図鑑に「${v.name}」を記録しました`);
     UI.dirtyZukan = true;
   },
@@ -553,19 +568,33 @@ const G = {
     for (const b of this.birds) b.update(dt);
     // 地上の鳩どうしは重ならない
     const ground = this.birds.filter((b) => !b.fly && !b.perch && b.state !== 'hop');
-    for (let i = 0; i < ground.length; i++)
-      for (let j = i + 1; j < ground.length; j++) {
-        const a = ground[i], b = ground[j];
-        const dx = b.x - a.x, dy = (b.y - a.y) * 1.6;
-        const d = Math.hypot(dx, dy);
-        const min = 6.5;
-        if (d < min && d > 0.001) {
-          const push = (min - d) * 0.5 * Math.min(1, dt * 12);
-          const nx = (dx / d) * push, ny = (dy / d) * push / 1.6;
-          if (this.scene.walkable(a.x - nx, a.y - ny)) { a.x -= nx; a.y -= ny; }
-          if (this.scene.walkable(b.x + nx, b.y + ny)) { b.x += nx; b.y += ny; }
+    const CELL = 8, grid = new Map();
+    for (const b of ground) {
+      const k = Math.floor(b.x / CELL) * 4096 + Math.floor(b.y / CELL);
+      let c = grid.get(k);
+      if (!c) grid.set(k, (c = []));
+      c.push(b);
+    }
+    const min = 6.5, k12 = Math.min(1, dt * 12);
+    for (const a of ground) {
+      const cx = Math.floor(a.x / CELL), cy = Math.floor(a.y / CELL);
+      for (let gx = cx - 1; gx <= cx + 1; gx++)
+        for (let gy = cy - 1; gy <= cy + 1; gy++) {
+          const c = grid.get(gx * 4096 + gy);
+          if (!c) continue;
+          for (const b of c) {
+            if (b.id <= a.id) continue; // 各ペア1回
+            const dx = b.x - a.x, dy = (b.y - a.y) * 1.6;
+            const d = Math.hypot(dx, dy);
+            if (d < min && d > 0.001) {
+              const push = (min - d) * 0.5 * k12;
+              const nx = (dx / d) * push, ny = (dy / d) * push / 1.6;
+              if (this.scene.walkable(a.x - nx, a.y - ny)) { a.x -= nx; a.y -= ny; }
+              if (this.scene.walkable(b.x + nx, b.y + ny)) { b.x += nx; b.y += ny; }
+            }
+          }
         }
-      }
+    }
     // 飛び去った鳩
     const before = this.birds.length;
     this.birds = this.birds.filter((b) => !b.left);
@@ -579,15 +608,25 @@ const G = {
     const resident = this.resident;
     if (t > this.nextSpawn) {
       // 少ないときほど早く来る
+      const lack = this.targetPop - resident;
       const short = resident < this.targetPop * 0.6;
       this.nextSpawn = t + (short ? U.rand(0.5, 1.4) : U.rand(2, 6));
-      if (resident < this.targetPop) this.spawnArrival(null, U.chance(0.15));
+      // 大幅に足りないときは何羽かまとめて来る
+      const n = lack > 0 ? Math.max(1, Math.ceil(lack / 12)) : 0;
+      for (let i = 0; i < n; i++) this.spawnArrival(null, U.chance(0.15));
     }
     // 上限を超えていたら、少しずつ飛び去る
     if (resident > this.cap && t > (this.nextLeave || 0)) {
-      this.nextLeave = t + (resident - this.cap > 8 ? 0.15 : 0.35);
+      const excess = resident - this.cap;
+      this.nextLeave = t + (excess > 8 ? 0.15 : 0.35);
       const cands = this.birds.filter((b) => !(b.fly && b.fly.out) && b.state !== 'carry');
-      if (cands.length) U.pick(cands).takeoff('leave');
+      // 大勢を減らすときは、まとまって飛び去る
+      const n = Math.min(cands.length, Math.max(1, Math.ceil(excess / 15)));
+      for (let i = 0; i < n; i++) {
+        const j = U.randi(i, cands.length - 1);
+        [cands[i], cands[j]] = [cands[j], cands[i]];
+        cands[i].takeoff('leave');
+      }
     }
     // 理由なき一斉飛翔
     if (t > this.nextPanic) {
@@ -880,8 +919,32 @@ const UI = {
     this.capEl = document.getElementById('cap');
     this.decEl = document.getElementById('pop-dec');
     this.incEl = document.getElementById('pop-inc');
-    this.decEl.addEventListener('click', () => g.setCap(-1));
-    this.incEl.addEventListener('click', () => g.setCap(1));
+    // −／＋: 押しっぱなしで連続
+    const hold = (el, dir) => {
+      let timer = null, delay = 0;
+      const stop = () => { clearTimeout(timer); timer = null; };
+      const tick = () => { g.stepCap(dir); delay = Math.max(70, delay * 0.8); timer = setTimeout(tick, delay); };
+      el.addEventListener('pointerdown', (e) => {
+        if (el.disabled) return;
+        e.preventDefault();
+        g.stepCap(dir);
+        delay = 260;
+        timer = setTimeout(tick, 420);
+      });
+      ['pointerup', 'pointerleave', 'pointercancel'].forEach((ev) => el.addEventListener(ev, stop));
+      // キーボード操作
+      el.addEventListener('click', (e) => { if (e.detail === 0) g.stepCap(dir); });
+    };
+    hold(this.decEl, -1);
+    hold(this.incEl, 1);
+    // 数字は直接入力できる
+    this.capEl.addEventListener('change', () => g.setCapValue(this.capEl.value));
+    this.capEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') this.capEl.blur();
+      if (e.key === 'Escape') { this.updateCap(true); this.capEl.blur(); }
+    });
+    this.capEl.addEventListener('focus', () => this.capEl.select());
+    this.capEl.addEventListener('blur', () => this.updateCap(true));
     this.updateCap();
     document.querySelectorAll('[data-tool]').forEach((b) => {
       b.addEventListener('click', () => {
@@ -911,12 +974,14 @@ const UI = {
     panel.addEventListener('click', (e) => { if (e.target === panel) panel.hidden = true; });
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.hidden = true; });
   },
-  updateCap() {
+  updateCap(force) {
     const g = this.g;
     const c = g.cap;
-    this.capEl.textContent = c;
-    this.decEl.disabled = c <= CAP_STEPS[0];
-    this.incEl.disabled = c >= CAP_STEPS[CAP_STEPS.length - 1];
+    // 入力中は書き換えない
+    if (force || document.activeElement !== this.capEl) this.capEl.value = c;
+    this.capEl.style.width = String(c).length + 1 + 'ch';
+    this.decEl.disabled = c <= CAP_MIN;
+    this.incEl.disabled = c >= CAP_MAX;
   },
   hideHint() {
     if (this.hint && !this.hint.hidden) this.hint.hidden = true;
@@ -926,6 +991,7 @@ const UI = {
     if (this.hud > 0) return;
     this.hud = 0.4;
     const g = this.g;
+    if (g.seenDirty) { g.seenDirty = false; STORE.set('hatodamari.seen', g.seen); }
     const n = g.birds.filter((b) => b.x > -5 && b.x < g.W + 5 && b.y - b.z > -5).length;
     this.countEl.textContent = n;
     const seen = VARIANTS.filter((v) => g.seen[v.id]).length;
