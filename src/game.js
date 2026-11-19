@@ -973,6 +973,57 @@ const UI = {
     document.getElementById('zk-close').addEventListener('click', () => { panel.hidden = true; });
     panel.addEventListener('click', (e) => { if (e.target === panel) panel.hidden = true; });
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.hidden = true; });
+    this.bindUiOff();
+  },
+  // UIオフ: 札や道具箱を隠して箱庭だけにする。ブラウザで開いているときは全画面も頼む
+  bindUiOff() {
+    const offBtn = document.getElementById('ui-off');
+    const onBtn = document.getElementById('ui-on');
+    const de = document.documentElement;
+    const standalone = () => matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches || navigator.standalone === true;
+    let wentFull = false, sleepT = null;
+    const wake = () => {
+      if (onBtn.hidden) return;
+      onBtn.classList.remove('sleep');
+      clearTimeout(sleepT);
+      sleepT = setTimeout(() => onBtn.classList.add('sleep'), 2500);
+    };
+    const set = (off) => {
+      document.body.classList.toggle('ui-off', off);
+      onBtn.hidden = !off;
+      this.label.hidden = true;
+      if (off) {
+        this.hideHint();
+        wake();
+        const req = de.requestFullscreen || de.webkitRequestFullscreen;
+        if (req && !standalone() && !(document.fullscreenElement || document.webkitFullscreenElement)) {
+          try {
+            const r = req.call(de, { navigationUI: 'hide' });
+            wentFull = true;
+            if (r && r.catch) r.catch(() => { wentFull = false; });
+          } catch (e) { wentFull = false; }
+        }
+      } else {
+        clearTimeout(sleepT);
+        onBtn.classList.remove('sleep');
+        const exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (wentFull && exit && (document.fullscreenElement || document.webkitFullscreenElement)) {
+          try { const r = exit.call(document); if (r && r.catch) r.catch(() => {}); } catch (e) { /* noop */ }
+        }
+        wentFull = false;
+        offBtn.focus({ preventScroll: true });
+      }
+    };
+    offBtn.addEventListener('click', () => set(true));
+    onBtn.addEventListener('click', () => set(false));
+    window.addEventListener('pointerdown', wake, true);
+    window.addEventListener('pointermove', (e) => { if (e.pointerType === 'mouse') wake(); }, true);
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'h' && e.key !== 'H') return;
+      if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      set(!document.body.classList.contains('ui-off'));
+    });
   },
   updateCap(force) {
     const g = this.g;
