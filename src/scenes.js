@@ -51,6 +51,69 @@ function makeLeaf(x, y, palette, kind) {
   return { x, y, z: 0, vz: 0, vx: 0, vy: 0, color: U.pick(palette), rot: U.randi(0, 3), kind, age: 0 };
 }
 
+// ---- 落ち葉だまりと、その下に隠れている実 ----
+// 実の見た目（[dx, dy, 色]）と、観察ツールで出す名前
+const NUTS = {
+  zelkova: { name: 'ケヤキの種', px: [[0, 0, '#4a2e18'], [1, 0, '#6e4a2a'], [1, -1, '#c89a64']] },
+  samara: { name: 'カエデの種', px: [[0, 0, '#5a2e18'], [1, 0, '#efd6a2'], [2, -1, '#f6e6c0']] },
+  grass: { name: '草の実', px: [[0, 0, '#e8d690'], [1, 0, '#b39a58'], [0, -1, '#fff2c0']] },
+  weed: { name: '雑草の種', px: [[0, 0, '#2a211a'], [1, 0, '#4a3c2e'], [1, -1, '#9a8a74']] },
+  berry: { name: '木の実', px: [[0, 0, '#4e0c1a'], [1, 0, '#7a1626'], [0, -1, '#8c1e30'], [1, -1, '#f4b0b8']] },
+};
+
+function inPile(p, x, y, k = 1) {
+  const dx = (x - p.x) / p.rx, dy = (y - p.y) / p.ry;
+  return dx * dx + dy * dy < k * k;
+}
+
+// 場面の pileDef（置き場所の候補・葉の色・出てくる実）から、画面の広さに応じた数だけ作る
+function makePiles(sc) {
+  const def = sc.pileDef;
+  if (!def) return [];
+  const want = U.clamp(Math.round(def.area / 20000), 2, 8);
+  const piles = [];
+  for (let i = 0; i < want * 40 && piles.length < want; i++) {
+    const s = def.spot();
+    const rx = U.rand(10, 14), ry = rx * 0.55;
+    if (!sc.walkable(s.x, s.y) || !sc.walkable(s.x - rx, s.y) || !sc.walkable(s.x + rx, s.y)) continue;
+    if (!sc.walkable(s.x, s.y - ry) || !sc.walkable(s.x, s.y + ry)) continue;
+    if (piles.some((p) => U.dist(p.x, p.y, s.x, s.y) < 30 + rx + p.rx)) continue;
+    const cap = Math.round(rx * 4);
+    const maxSeeds = U.randi(4, 7);
+    piles.push({ x: s.x, y: s.y, rx, ry, cap, n: cap, busy: 0, seeds: maxSeeds, maxSeeds, seedT: U.rand(14, 28), nuts: def.nuts });
+  }
+  for (const p of piles) {
+    // 下地: 葉が重なって暗くなったところ（葉が減ると薄くなる）
+    const uw = Math.ceil(p.rx * 2) + 2, uh = Math.ceil(p.ry * 2) + 2;
+    p.under = U.canvas(uw, uh);
+    const ug = p.under.getContext('2d');
+    for (let y = 0; y < uh; y++)
+      for (let x = 0; x < uw; x++) {
+        const wx = p.x - uw / 2 + x + 0.5, wy = p.y - uh / 2 + y + 0.5;
+        const e = ((wx - p.x) / p.rx) ** 2 + ((wy - p.y) / p.ry) ** 2;
+        if (e > 0.85 + U.rand(-0.15, 0.15)) continue;
+        const c = U.hex(U.pick(def.leaf(wx, wy).pal));
+        ug.fillStyle = U.css(U.shade(c, U.rand(0.5, 0.72) + (1 - e) * 0.12));
+        ug.fillRect(x, y, 1, 1);
+      }
+    p.ux = Math.round(p.x - uw / 2); p.uy = Math.round(p.y - uh / 2);
+    const ls = [];
+    for (let i = 0; i < p.cap; i++) {
+      const a = U.rand(0, Math.PI * 2);
+      const r = Math.sqrt(U.rand(0, 1)) * (U.chance(0.4) ? U.rand(0.4, 1) : 1);
+      const x = p.x + Math.cos(a) * r * p.rx, y = p.y + Math.sin(a) * r * p.ry;
+      const lk = def.leaf(x, y);
+      const l = makeLeaf(x, y, lk.pal, lk.kind);
+      l.pile = p;
+      l.lift = r < 0.35 ? 2 : r < 0.68 ? 1 : 0; // まんなかほど盛り上がる
+      ls.push(l);
+    }
+    ls.sort((a, b) => a.lift - b.lift || a.y - b.y);
+    sc.leaves.push(...ls);
+  }
+  return piles;
+}
+
 // ---- 共通の小物 ----
 function drawTreeCanopy(g, cx, cy, r, colors, seed) {
   const cs = colors.map(U.hex);
@@ -265,6 +328,29 @@ function buildPark(W, H) {
     // 鳩が好きな場所（小道の上）
     preferred(x, y) { return Math.abs(y - pathY(x)) < pathHalf; },
     pathY, pathHalf,
+    // 落ち葉だまり: 色づく木の根元と、芝生のあちこち
+    pileDef: {
+      area: W * (H - top),
+      nuts: ['zelkova', 'zelkova', 'samara', 'grass'],
+      spot() {
+        const cs = trees.filter((t) => t.kind !== 'green');
+        let x, y;
+        if (cs.length && U.chance(0.6)) {
+          const t = U.pick(cs);
+          x = t.x + U.rand(-38, 38); y = top + U.rand(7, 24);
+        } else {
+          x = U.rand(10, W - 10); y = U.rand(top + 7, H - 7);
+        }
+        if (Math.abs(y - pathY(x)) < pathHalf + 7) y = pathY(x) + (y < pathY(x) ? -1 : 1) * (pathHalf + U.rand(8, 14));
+        return { x, y };
+      },
+      leaf(x) {
+        const cs = trees.filter((t) => t.kind !== 'green');
+        let t = cs.reduce((a, b) => (Math.abs(b.x - x) < Math.abs(a.x - x) ? b : a), cs[0]);
+        if (!t || U.chance(0.3)) t = U.pick(cs.length ? cs : [{ kind: 'zelkova' }]);
+        return { pal: PAL.leafColors[t.kind], kind: t.kind === 'ginkgo' ? 'ginkgo' : 'leaf' };
+      },
+    },
   };
 }
 
@@ -385,6 +471,16 @@ function buildStreet(W, H) {
       return true;
     },
     preferred(x, y) { return y < roadTop; },
+    // 落ち葉だまり: 壁ぎわと縁石ぎわの吹きだまり
+    pileDef: {
+      area: W * (roadTop - wallH) * 1.4,
+      nuts: ['grass', 'weed', 'weed', 'zelkova'],
+      spot() {
+        const x = U.rand(10, W - 10);
+        return { x, y: U.chance(0.5) ? U.rand(wallH + 8, wallH + 11) : U.rand(roadTop - 7, roadTop - 5) };
+      },
+      leaf() { return U.chance(0.85) ? { pal: PAL.leafColors.ginkgo, kind: 'ginkgo' } : { pal: PAL.leafColors.zelkova, kind: 'leaf' }; },
+    },
   };
 }
 
@@ -479,6 +575,16 @@ function buildRiver(W, H) {
       return true;
     },
     preferred(x, y) { return y < pathBot; },
+    // 落ち葉だまり: 護岸の足もとと、土手の草むら
+    pileDef: {
+      area: W * (H - pathTop),
+      nuts: ['berry', 'berry', 'grass', 'weed'],
+      spot() {
+        const x = U.rand(10, W - 10);
+        return { x, y: U.chance(0.55) ? U.rand(pathTop + 6, pathTop + 10) : U.rand(pathBot + 6, H - 7) };
+      },
+      leaf() { return U.chance(0.8) ? { pal: PAL.leafColors.sakura, kind: 'leaf' } : { pal: PAL.leafColors.zelkova, kind: 'leaf' }; },
+    },
     drawAnim(ctx, t) {
       for (const gl of glints) {
         const x = (gl.x + t * 6) % (W + 10) - 5;

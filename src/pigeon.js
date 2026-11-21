@@ -7,7 +7,7 @@ const STATE_LABEL = {
   idle: 'ぼんやり', walk: 'うろうろ', forage: 'さがしもの', peck: 'つついている', leaf: '落ち葉をめくっている',
   preen: '羽づくろい', rest: 'ひなたぼっこ', coo: '求愛中（ぐるっぽー）', fly: '飛んでいる', perch: 'ひと休み',
   alert: '警戒', evade: 'よけている', food: '餌に突進', peckfood: '食べている', carry: 'パンを持ち逃げ', hop: 'ばたばた',
-  look: 'きょろきょろ',
+  look: 'きょろきょろ', rummage: '落ち葉だまりをあさっている',
 };
 
 class Pigeon {
@@ -40,6 +40,8 @@ class Pigeon {
     this.perch = null;
     this.food = null;
     this.target = null;
+    this.pile = null;
+    this.nut = null;
     this.calm = 0; // 驚いた直後の無反応時間
     this.takeoffAt = -1;
     this.left = false;
@@ -50,6 +52,7 @@ class Pigeon {
   }
 
   get label() {
+    if (this.state === 'rummage' && this.nut && this.g.nuts.includes(this.nut)) return `${NUTS[this.nut.kind].name}を見つけた`;
     return STATE_LABEL[this.state] || '';
   }
 
@@ -96,6 +99,11 @@ class Pigeon {
       const f = this.findFood(150 + this.greed * 80);
       if (f) return this.goFood(f);
     }
+    // 落ち葉だまり（餌がないときの寄り道）
+    const nut = g.looseNut(this.x, this.y, 30);
+    if (nut && U.chance(0.6)) return this.goRummage(nut.pile, nut);
+    const pile = this.pickPile();
+    if (pile) return this.goRummage(pile);
     const r = Math.random();
     const leaf = g.nearestLeaf(this.x, this.y, 40);
     if (leaf && r < 0.14) {
@@ -127,6 +135,33 @@ class Pigeon {
     if (r < 0.93 && g.scene.perches.length) return this.takeoff('perch');
     if (r < 0.95) return this.takeoff('hopto');
     return this.set('idle', U.rand(1, 3));
+  }
+
+  pickPile() {
+    let best = null, bd = this.kiji ? 130 : 90;
+    for (const p of this.g.piles) {
+      if (p.busy >= 4 || p.n < 4) continue;
+      const d = U.dist(p.x, p.y, this.x, this.y);
+      if (d < bd) { bd = d; best = p; }
+    }
+    if (!best) return null;
+    // キジバトは地面の種拾いが得意。葉が多いほど、仲間があさっているほど寄りたくなる
+    let ch = (this.kiji ? 0.28 : 0.08) * (0.35 + 0.65 * Math.min(1, best.n / best.cap));
+    if (best.busy > 0) ch += 0.1;
+    return U.chance(ch) ? best : null;
+  }
+
+  goRummage(p, nut) {
+    this.pile = p;
+    this.nut = nut || null;
+    if (nut) nut.taker = this;
+    this.nutSide = 0;
+    this.pileSide = this.x < p.x ? -1 : 1;
+    this.pileDy = U.rand(-0.5, 0.5) * p.ry;
+    this.miss = 0;
+    this.rt = 0;
+    this.set('rummage', U.rand(7, 16) * (this.kiji ? 1.4 : 1));
+    if (nut) this.n = -1;
   }
 
   wanderTarget(rad) {
@@ -368,16 +403,14 @@ class Pigeon {
           if (Math.floor(k) > this.sub - 1 && (k % 1) > 0.5) {
             this.sub++;
             // くちばしで払いのける
-            lf.vx = this.dir * U.rand(6, 20) + U.rand(-8, 8);
-            lf.vy = U.rand(-10, 10);
-            lf.vz = U.rand(14, 30);
-            lf.rot = (lf.rot + U.randi(1, 3)) % 4;
+            g.flickLeaf(lf, this.dir * U.rand(6, 20) + U.rand(-8, 8), U.rand(-10, 10), U.rand(14, 30));
             g.dust(lf.x, lf.y);
           }
           if (k >= this.n) this.set(U.chance(0.5) ? 'peck' : 'idle', 0.8), (this.n = 1);
         }
         break;
       }
+      case 'rummage': this.updateRummage(dt); break;
       case 'coo': {
         const tg = this.target;
         if (!tg || tg.left || tg.fly) { this.set('idle', 1); break; }
@@ -545,6 +578,103 @@ class Pigeon {
     }
     // 地上にいて地面以外にいたら補正
     if (!this.perch && !this.fly && this.state !== 'hop') this.z = 0;
+  }
+
+  // 落ち葉だまりをあさる: だまりの縁へ → 葉を払う → たまに実が出る → 拾って食べる
+  updateRummage(dt) {
+    const g = this.g, p = this.pile;
+    if (!p || !g.piles.includes(p)) { this.nut = null; this.think(); return; }
+    // 餌がまかれていたらそっちが先
+    if (g.foods.length && U.chance(dt * (0.4 + this.greed))) {
+      const f = this.findFood(150 + this.greed * 80);
+      if (f) { this.nut = null; this.goFood(f); return; }
+    }
+    this.rt += dt;
+    if (this.nut) {
+      const n = this.nut;
+      if (!g.nuts.includes(n)) { this.nut = null; this.sub = 0; return; }
+      if (n.z > 0) { this.pose = 'look'; this.dir = n.x > this.x ? 1 : -1; this.rt = 0; return; }
+      if (!this.nutSide || Math.abs(this.x - n.x) > 12) this.nutSide = this.x < n.x ? -1 : 1;
+      const tx = n.x + this.nutSide * 7;
+      if (this.n >= 0 && U.dist(tx, n.y, this.x, this.y) > 1.5) {
+        this.n = -1;
+        this.rt = 0;
+      }
+      if (this.n < 0) {
+        // 実のところまで
+        if (this.stepToward(tx, n.y, this.walkSpeed * 1.5, dt) || U.dist(tx, n.y, this.x, this.y) < 1.5) {
+          this.x = tx; this.y = n.y;
+          this.n = U.randi(1, 3); this.rt = 0;
+          this.dir = -this.nutSide;
+        } else if (this.rt > 4) { this.nut = null; this.sub = 0; }
+        return;
+      }
+      // つついて、飲みこむ
+      const per = 0.3;
+      const k = this.rt / per;
+      if (k < this.n) {
+        const t = 1 - Math.abs((k % 1) * 2 - 1);
+        this.pose = `peck:${(Math.round(t * 3) / 3).toFixed(2)}:0`;
+      } else {
+        this.pose = 'stand:1:0';
+        if (k > this.n + 1.2) {
+          g.eatNut(n);
+          this.nut = null; this.miss = 0;
+          this.sub = U.chance(0.5) ? 0 : 1; this.n = 0; this.rt = 0;
+          if (this.sub === 0) { this.pileSide = this.x < p.x ? -1 : 1; this.pileDy = U.rand(-0.5, 0.5) * p.ry; }
+        }
+      }
+      return;
+    }
+    const ox = p.x + this.pileSide * (p.rx * 0.55 + 4), oy = p.y + this.pileDy;
+    if (this.sub === 0) {
+      if (this.stepToward(ox, oy, this.walkSpeed, dt) || U.dist(this.x, this.y, ox, oy) < 1.5) {
+        this.sub = 1; this.n = 0; this.rt = 0;
+        this.dir = -this.pileSide;
+      }
+      if (this.st > this.dur + 4) this.set('idle', 0.5);
+      return;
+    }
+    // 葉をかき分ける
+    const per = 0.4;
+    const k = this.rt / per;
+    const t = 1 - Math.abs((k % 1) * 2 - 1);
+    this.pose = `peck:${(Math.round(t * 3) / 3).toFixed(2)}:0`;
+    if (Math.floor(k) >= this.n && (k % 1) > 0.5) {
+      this.n++;
+      const bx = this.x + this.dir * 7, by = this.y;
+      let lf = null, bd = 8;
+      for (const l of g.leaves) {
+        if (l.pile !== p || l.z > 0) continue;
+        const d = U.dist(l.x, l.y, bx, by) - (l.lift || 0) * 2; // 上に積もった葉から
+        if (d < bd) { bd = d; lf = l; }
+      }
+      if (lf) {
+        const side = U.chance(0.5) ? 1 : -1;
+        g.flickLeaf(lf, side * U.rand(5, 16) + this.dir * U.rand(0, 6), U.rand(-10, 10), U.rand(10, 24));
+        if (U.chance(0.5)) g.dust(bx, by);
+      }
+      // だまりから実が出てくる（ないこともある）
+      const loose = g.looseNut(bx, by, p.rx + 6);
+      if (loose) { this.nut = loose; loose.taker = this; }
+      else if (p.seeds > 0 && lf && U.chance(this.kiji ? 0.3 : 0.2)) {
+        p.seeds--;
+        this.nut = g.spawnNut(bx, by, p, this.dir);
+        this.nut.taker = this;
+      } else this.miss++;
+      if (this.nut) { this.nutSide = 0; this.n = -1; return; }
+      // ときどき場所を変える
+      if (this.n >= U.randi(3, 6)) {
+        this.sub = 0;
+        if (U.chance(0.35)) this.pileSide = -this.pileSide;
+        this.pileDy = U.rand(-0.5, 0.5) * p.ry;
+        if (U.chance(0.3)) { this.set('look', U.rand(0.4, 1)); return; }
+      }
+    }
+    // 飽きる / 掘りつくした
+    if (this.st > this.dur || this.miss > (this.kiji ? 12 : 8) || p.n < 3) {
+      this.set(U.chance(0.4) ? 'preen' : 'idle', U.rand(0.6, 2));
+    }
   }
 
   bump(from) {
