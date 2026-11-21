@@ -146,6 +146,7 @@ const G = {
   nextEvent: 8, nextPanic: 45, nextSpawn: 1, nextLeaf: 1, flapCount: 0,
   userCap: (() => { const v = Math.round(Number(STORE.get('hatodamari.cap', 0))); return v >= CAP_MIN && v <= CAP_MAX ? v : 0; })(),
   seenDirty: false,
+  slow: STORE.get('hatodamari.slow', false) === true, // のんびりモード: 全体を0.8倍速
 
   init() {
     this.cv = document.getElementById('game');
@@ -660,7 +661,7 @@ const G = {
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     if (!document.hidden) {
-      this.update(dt);
+      this.update(this.slow ? dt * 0.8 : dt);
       this.draw();
     }
     requestAnimationFrame((t) => this.frame(t));
@@ -1109,6 +1110,21 @@ const UI = {
       else if (!SFX.enable()) { this.toast('このブラウザでは音が出せません'); return; }
       snd.setAttribute('aria-pressed', String(SFX.on));
       snd.querySelector('span').textContent = SFX.on ? '音あり' : '音なし';
+    });
+    const slow = document.getElementById('slow');
+    const setSlow = (on, toast) => {
+      g.slow = on;
+      STORE.set('hatodamari.slow', on);
+      slow.setAttribute('aria-pressed', String(on));
+      if (toast) this.toast(on ? 'のんびりモード（0.8倍速）' : 'ふつうの速さに戻しました');
+    };
+    setSlow(g.slow, false);
+    slow.addEventListener('click', () => setSlow(!g.slow, false));
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'n' && e.key !== 'N') return;
+      if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      setSlow(!g.slow, true);
     });
     const panel = document.getElementById('zukan');
     document.getElementById('zk-open').addEventListener('click', () => { this.renderZukan(); panel.hidden = false; });
