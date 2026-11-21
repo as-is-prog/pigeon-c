@@ -139,13 +139,14 @@ const GRAIN = ['#e3c35a', '#d8b46a', '#c99a4a', '#efe2b0', '#b5643a', '#e8d48a',
 
 const G = {
   t: 0, W: 320, H: 200, scale: 3,
-  birds: [], foods: [], leaves: [], falling: [], actors: [], fx: [], flocks: [], pending: [],
+  birds: [], foods: [], leaves: [], falling: [], piles: [], nuts: [], actors: [], fx: [], flocks: [], pending: [],
   tool: 'seed', hover: null, selected: null,
   seen: STORE.get('hatodamari.seen', {}),
   sfx: SFX,
   nextEvent: 8, nextPanic: 45, nextSpawn: 1, nextLeaf: 1, flapCount: 0,
   userCap: (() => { const v = Math.round(Number(STORE.get('hatodamari.cap', 0))); return v >= CAP_MIN && v <= CAP_MAX ? v : 0; })(),
   seenDirty: false,
+  slow: STORE.get('hatodamari.slow', false) === true, // のんびりモード: 全体を0.8倍速
 
   init() {
     this.cv = document.getElementById('game');
@@ -182,6 +183,9 @@ const G = {
     STORE.set('hatodamari.scene', id);
     this.scene = SCENES[id](this.W, this.H);
     this.leaves = this.scene.leaves;
+    this.piles = makePiles(this.scene);
+    this.nuts = [];
+    this.nextGather = this.t + 2;
     this.foods = [];
     this.falling = [];
     this.actors = [];
@@ -327,6 +331,113 @@ const G = {
       if (this.scene.walkable(px, py)) return { x: px, y: py };
     }
     return this.randomGround(true);
+  },
+
+  // くちばしで葉を払う（落ち葉だまりの盛り上がりからも飛ぶ）
+  flickLeaf(l, vx, vy, vz) {
+    l.z = Math.max(l.z, l.lift || 0);
+    l.lift = 0;
+    l.slide = null;
+    l.vx = vx; l.vy = vy; l.vz = vz;
+    l.rot = (l.rot + U.randi(1, 3)) % 4;
+  },
+
+  // 葉が地面に落ち着いたら、だまりの中かどうかで仲間入り・脱退
+  leafLanded(l) {
+    l.lift = 0;
+    l.pile = this.piles.find((p) => inPile(p, l.x, l.y, 0.95)) || null;
+  },
+
+  // ---- 落ち葉だまりの実 ----
+  spawnNut(x, y, p, dir) {
+    const n = { kind: U.pick(p.nuts), pile: p, x, y, z: 2, vx: dir * U.rand(9, 17) + U.rand(-4, 4), vy: U.rand(-6, 6), vz: U.rand(22, 32), born: this.t };
+    this.nuts.push(n);
+    if (this.nuts.length > 40) this.nuts.shift();
+    this.fx.push({ k: 'glint', x, y, life: 0.45 });
+    return n;
+  },
+
+  eatNut(n) {
+    const i = this.nuts.indexOf(n);
+    if (i >= 0) this.nuts.splice(i, 1);
+  },
+
+  // だまりのまわりに転がっていて、まだ誰も狙っていない実
+  looseNut(x, y, r) {
+    let best = null, bd = r;
+    for (const n of this.nuts) {
+      if (n.z > 0) continue;
+      const d = U.dist(n.x, n.y, x, y);
+      if (d >= bd) continue;
+      const tk = n.taker;
+      if (tk && tk.nut === n && tk.state === 'rummage' && !tk.left) continue;
+      bd = d; best = n;
+    }
+    return best;
+  },
+
+  updatePiles(dt) {
+    const t = this.t;
+    for (const p of this.piles) { p.n = 0; p.busy = 0; }
+    for (const l of this.leaves) if (l.pile && !l.z) l.pile.n++;
+    for (const b of this.birds) if (b.state === 'rummage' && b.pile) b.pile.busy++;
+    // 実は葉が積もっていれば少しずつ戻る（掘りつくすと葉が寄るまで出ない）
+    for (const p of this.piles) {
+      if (p.seeds >= p.maxSeeds || p.n < p.cap * 0.45) continue;
+      p.seedT -= dt;
+      if (p.seedT <= 0) { p.seeds++; p.seedT = U.rand(14, 28); }
+    }
+    // 風で葉がだまりに寄っていく
+    if (t > this.nextGather && this.piles.length) {
+      this.nextGather = t + U.rand(0.3, 0.9);
+      let sliding = 0;
+      for (const l of this.leaves) if (l.slide) sliding++;
+      const p = this.piles.reduce((a, b) => (b.n / b.cap < a.n / a.cap ? b : a));
+      if (sliding < 12 && p.n < p.cap) {
+        let best = null, bd = 95;
+        for (const l of this.leaves) {
+          if (l.pile || l.slide || l.z > 0 || l.vz) continue;
+          const d = U.dist(l.x, l.y, p.x, p.y);
+          if (d < bd && U.chance(0.7)) { bd = d; best = l; }
+        }
+        const a = U.rand(0, Math.PI * 2), r = Math.sqrt(U.rand(0, 1)) * 0.75;
+        const tx = p.x + Math.cos(a) * r * p.rx, ty = p.y + Math.sin(a) * r * p.ry;
+        if (best) best.slide = { x: tx, y: ty, sp: U.rand(5, 10), lift: r < 0.45 ? 1 : 0 };
+        else if (p.n < p.cap * 0.6 && this.scene.fallingLeaves) {
+          // 寄せる葉がなければ上から降ってくる
+          const src = U.pick(this.scene.fallingLeaves);
+          const pal = PAL.leafColors[src.kind] || PAL.leafColors.zelkova;
+          this.falling.push({ ...makeLeaf(tx, ty, pal, src.kind === 'ginkgo' ? 'ginkgo' : 'leaf'), z: U.rand(35, 70), ph: U.rand(0, 6), wind: 0 });
+        }
+      }
+    }
+    // 実の物理
+    for (const n of this.nuts) {
+      if (n.z > 0 || n.vz) {
+        n.vz -= 150 * dt;
+        n.x += n.vx * dt; n.y += n.vy * dt; n.z += n.vz * dt;
+        if (n.z <= 0) {
+          n.z = 0;
+          if (n.vz < -20) { n.vz = -n.vz * 0.3; n.vx *= 0.4; n.vy *= 0.4; }
+          else {
+            n.vz = 0; n.vx = n.vy = 0;
+            if (!this.scene.walkable(n.x, n.y)) { const g = this.groundNear(n.x, n.y, 8); n.x = g.x; n.y = g.y; }
+          }
+        }
+      }
+    }
+  },
+
+  drawNut(n, y) {
+    const c = this.ctx;
+    if (!n.z) {
+      c.fillStyle = 'rgba(20,16,10,0.35)';
+      c.fillRect(Math.round(n.x), Math.round(y) + 1, 2, 1);
+    }
+    for (const [dx, dy, col] of NUTS[n.kind].px) {
+      c.fillStyle = col;
+      c.fillRect(Math.round(n.x) + dx, Math.round(y) + dy, 1, 1);
+    }
   },
 
   nearestLeaf(x, y, r) {
@@ -550,7 +661,7 @@ const G = {
     const dt = Math.min(0.05, (now - this.last) / 1000);
     this.last = now;
     if (!document.hidden) {
-      this.update(dt);
+      this.update(this.slow ? dt * 0.8 : dt);
       this.draw();
     }
     requestAnimationFrame((t) => this.frame(t));
@@ -673,9 +784,24 @@ const G = {
       if (l.z > 0 || l.vz) {
         l.vz -= 90 * dt;
         l.x += l.vx * dt; l.y += l.vy * dt * 0.6; l.z += l.vz * dt;
-        if (l.z <= 0) { l.z = 0; l.vz = 0; l.vx = l.vy = 0; }
+        if (l.z <= 0) {
+          l.z = 0; l.vz = 0; l.vx = l.vy = 0;
+          if (!this.scene.walkable(l.x, l.y)) { const g = this.groundNear(l.x, l.y, 6); l.x = g.x; l.y = g.y; }
+          this.leafLanded(l);
+        }
+      } else if (l.slide) {
+        // 地面をかさかさ転がる
+        const s = l.slide;
+        const dx = s.x - l.x, dy = s.y - l.y, d = Math.hypot(dx, dy);
+        const st = Math.min(d, s.sp * dt * (0.6 + Math.abs(Math.sin(t * 3 + l.x)) * 0.8));
+        if (d < 0.6) { l.slide = null; this.leafLanded(l); l.lift = l.pile ? s.lift : 0; }
+        else {
+          l.x += (dx / d) * st; l.y += (dy / d) * st;
+          if (Math.floor(t * 4 + l.y) % 3 === 0) l.rot = Math.floor(t * 5 + l.x) % 4;
+        }
       }
     }
+    this.updatePiles(dt);
     if (t > this.nextLeaf && this.scene.fallingLeaves) {
       this.nextLeaf = t + U.rand(0.8, 3);
       const src = U.pick(this.scene.fallingLeaves);
@@ -692,12 +818,14 @@ const G = {
       if (Math.floor(t * 5 + l.ph) % 3 === 0) l.rot = Math.floor(t * 4 + l.ph) % 4;
       if (l.z <= 0) {
         l.z = 0; l.done = true;
-        if (this.scene.walkable(l.x, l.y)) this.leaves.push(l);
+        if (this.scene.walkable(l.x, l.y)) { this.leaves.push(l); this.leafLanded(l); }
       }
       if (l.x > this.W + 10) l.done = true;
     }
     this.falling = this.falling.filter((l) => !l.done);
-    if (this.leaves.length > 170) this.leaves.splice(0, this.leaves.length - 170);
+    // 増えすぎたら古い葉から消す（だまりの葉は残す）
+    let excess = this.leaves.length - 170 - this.piles.reduce((a, p) => a + p.cap, 0);
+    if (excess > 0) this.leaves = this.leaves.filter((l) => l.pile || excess-- <= 0);
     // エフェクト
     for (const e of this.fx) {
       e.life -= dt;
@@ -732,7 +860,13 @@ const G = {
     }
     if (s.overlay) c.drawImage(s.overlay, 0, 0);
     // 地面のもの
-    for (const l of this.leaves) c.drawImage(leafSprite(l.color, l.rot, l.kind), Math.round(l.x) - 2, Math.round(l.y - l.z) - 2);
+    for (const p of this.piles) {
+      c.globalAlpha = U.clamp((p.n / p.cap) * 1.3 - 0.15, 0, 1);
+      if (c.globalAlpha > 0.02) c.drawImage(p.under, p.ux, p.uy);
+    }
+    c.globalAlpha = 1;
+    for (const l of this.leaves) c.drawImage(leafSprite(l.color, l.rot, l.kind), Math.round(l.x) - 2, Math.round(l.y - l.z - (l.lift || 0)) - 2);
+    for (const n of this.nuts) if (n.z <= 0) this.drawNut(n, n.y);
     for (const e of this.fx) {
       if (e.k === 'ripple') {
         const r = Math.round((0.8 - e.life) * 8) + 1;
@@ -777,9 +911,18 @@ const G = {
     }
     // 空中のもの
     for (const f of this.foods) if (f.z > 0 && !f.carrier) this.drawFood(f, f.x, f.y - f.z);
+    for (const n of this.nuts) if (n.z > 0) this.drawNut(n, n.y - n.z);
     for (const l of this.falling) c.drawImage(leafSprite(l.color, l.rot, l.kind), Math.round(l.x) - 2, Math.round(l.y - l.z) - 2);
     for (const e of this.fx) {
       if (e.k === 'dust') { c.fillStyle = 'rgba(150,130,100,0.8)'; c.fillRect(Math.round(e.x), Math.round(e.y - e.z), 1, 1); }
+      if (e.k === 'glint') {
+        // 見つけた！のきらっ
+        const r = e.life > 0.3 ? 1 : 2, x = Math.round(e.x), y = Math.round(e.y) - 5;
+        c.fillStyle = 'rgba(255,250,220,' + Math.min(1, e.life * 3).toFixed(2) + ')';
+        c.fillRect(x, y, 1, 1);
+        c.fillRect(x - r, y, 1, 1); c.fillRect(x + r, y, 1, 1);
+        c.fillRect(x, y - r, 1, 1); c.fillRect(x, y + r, 1, 1);
+      }
       if (e.k === 'clap') {
         const r = (0.6 - e.life) * 110;
         c.strokeStyle = 'rgba(255,250,235,' + (e.life / 0.6).toFixed(2) + ')';
@@ -967,6 +1110,21 @@ const UI = {
       else if (!SFX.enable()) { this.toast('このブラウザでは音が出せません'); return; }
       snd.setAttribute('aria-pressed', String(SFX.on));
       snd.querySelector('span').textContent = SFX.on ? '音あり' : '音なし';
+    });
+    const slow = document.getElementById('slow');
+    const setSlow = (on, toast) => {
+      g.slow = on;
+      STORE.set('hatodamari.slow', on);
+      slow.setAttribute('aria-pressed', String(on));
+      if (toast) this.toast(on ? 'のんびりモード（0.8倍速）' : 'ふつうの速さに戻しました');
+    };
+    setSlow(g.slow, false);
+    slow.addEventListener('click', () => setSlow(!g.slow, false));
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'n' && e.key !== 'N') return;
+      if (e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      setSlow(!g.slow, true);
     });
     const panel = document.getElementById('zukan');
     document.getElementById('zk-open').addEventListener('click', () => { this.renderZukan(); panel.hidden = false; });
