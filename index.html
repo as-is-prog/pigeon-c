@@ -302,7 +302,7 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
   background: #fbf5e6;
   padding: 8px 10px 10px;
   display: grid;
-  grid-template-rows: auto auto auto 1fr auto;
+  grid-template-rows: auto auto auto 1fr auto auto;
   gap: 4px;
   min-width: 0;
 }
@@ -318,6 +318,42 @@ button[aria-pressed="true"] .ico.look { filter: invert(1); }
 .card .ct { font-size: 11px; color: var(--neck-g); }
 .card.unseen { background: var(--paper-2); }
 .card.unseen .nm { color: var(--ink-soft); letter-spacing: .2em; }
+.card.off { opacity: .55; }
+.card.off canvas { filter: grayscale(.8); }
+.card .call {
+  justify-self: start;
+  font-size: 13px;
+  padding: 3px 8px;
+  margin-top: 2px;
+  box-shadow: 1px 1px 0 var(--shadow);
+}
+.card .call:active { transform: translate(1px, 1px); }
+.card .call i {
+  width: 10px; height: 10px; display: inline-block;
+  border: 2px solid currentColor;
+  box-sizing: border-box;
+}
+.card .call[aria-pressed="true"] i { background: var(--neck-g); border-color: var(--paper); }
+.zk-only {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  padding: 8px 14px;
+  border-bottom: 2px dotted var(--ink-soft);
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.zk-only-btns { display: flex; gap: 6px; }
+.zk-only-btns button { font-size: 13px; padding: 4px 8px; box-shadow: 1px 1px 0 var(--shadow); }
+.only-mark {
+  font-size: 11px;
+  padding: 1px 4px;
+  background: var(--neck-g);
+  color: var(--paper);
+}
+button[aria-pressed="true"] .only-mark { background: var(--paper); color: var(--ink); }
 
 /* UIオフ: 箱庭だけを見る。右下の小さな札で戻す */
 body.ui-off .top,
@@ -394,7 +430,7 @@ body.ui-off #toast { display: none !important; }
         <button id="pop-inc" class="step" aria-label="上限を増やす" title="上限を増やす">＋</button>
       </span>
     </div>
-    <button id="zk-open" title="これまでに見た羽色">図鑑 <span id="zk-count">0/15</span></button>
+    <button id="zk-open" title="これまでに見た羽色／呼ぶ鳩をしぼる">図鑑 <span id="zk-count">0/15</span><span id="zk-only" class="only-mark" hidden title="呼ぶ鳩をしぼり中">しぼり中</span></button>
     <button id="sound" aria-pressed="false" title="羽音と鳴き声"><span>音なし</span></button>
     <button id="slow" aria-pressed="false" title="全体を0.8倍速にする（N キー）">のんびり</button>
     <button id="ui-off" title="UIを隠して箱庭だけを見る（H キー）">UIオフ</button>
@@ -429,6 +465,13 @@ body.ui-off #toast { display: none !important; }
       </div>
       <button id="zk-close">閉じる</button>
     </header>
+    <div class="zk-only" role="group" aria-label="呼ぶ鳩">
+      <span id="zk-state" aria-live="polite"></span>
+      <span class="zk-only-btns">
+        <button id="zk-all" title="見つけた羽色をぜんぶ呼ぶ（しぼりこみをやめる）">ぜんぶ呼ぶ</button>
+        <button id="zk-none" title="いったんぜんぶ外して、呼ぶ鳩を選び直す">ぜんぶ外す</button>
+      </span>
+    </div>
     <div id="zk-grid"></div>
   </section>
 </div>

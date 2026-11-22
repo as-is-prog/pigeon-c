@@ -146,6 +146,11 @@ const G = {
   nextEvent: 8, nextPanic: 45, nextSpawn: 1, nextLeaf: 1, flapCount: 0,
   userCap: (() => { const v = Math.round(Number(STORE.get('hatodamari.cap', 0))); return v >= CAP_MIN && v <= CAP_MAX ? v : 0; })(),
   seenDirty: false,
+  // 図鑑でしぼった「呼ぶ鳩」。null ならぜんぶ。空の Set は選び途中とみなしてぜんぶ扱い
+  only: (() => {
+    const a = STORE.get('hatodamari.only', null);
+    return Array.isArray(a) ? new Set(a.filter((id) => VARIANT_BY_ID[id])) : null;
+  })(),
   slow: STORE.get('hatodamari.slow', false) === true, // のんびりモード: 全体を0.8倍速
 
   init() {
@@ -249,9 +254,25 @@ const G = {
     UI.updateCap();
   },
 
+  // しぼりこみが効いているか（見つけた種類のうち1種以上を選んでいるとき）
+  get filtering() {
+    return !!this.only && VARIANTS.some((v) => this.only.has(v.id) && this.seen[v.id]);
+  },
+  // この羽色を呼んでいるか
+  calls(v) {
+    return !this.filtering || this.only.has(v.id);
+  },
+  setOnly(set) {
+    // 見つけた種類をぜんぶ選んだら、しぼりこみなし（新しい種類も来る）に戻す
+    if (set && VARIANTS.every((v) => !this.seen[v.id] || set.has(v.id))) set = null;
+    this.only = set;
+    STORE.set('hatodamari.only', set ? [...set] : null);
+    this.nextSwap = this.t + 0.8; // 呼んでいない鳩は少し間をおいてから帰りはじめる
+  },
   pickVariant() {
     const km = this.scene.kijiMul;
-    return U.weighted(VARIANTS, (v) => v.weight * (v.species === 'kiji' ? km : 1));
+    const pool = this.filtering ? VARIANTS.filter((v) => this.only.has(v.id) && this.seen[v.id]) : VARIANTS;
+    return U.weighted(pool, (v) => v.weight * (v.species === 'kiji' ? km : 1));
   },
 
   populate() {
@@ -739,6 +760,18 @@ const G = {
         cands[i].takeoff('leave');
       }
     }
+    // 図鑑でしぼったら、呼んでいない鳩から少しずつ帰っていく（代わりに呼んだ鳩が来る）
+    if (this.filtering && t > (this.nextSwap || 0)) {
+      const cands = this.birds.filter((b) => !this.calls(b.v) && !(b.fly && b.fly.out) && b.state !== 'carry');
+      this.nextSwap = t + (cands.length > 20 ? 0.25 : U.rand(0.5, 1.2));
+      const n = Math.min(cands.length, Math.max(1, Math.ceil(cands.length / 25)));
+      for (let i = 0; i < n; i++) {
+        const j = U.randi(i, cands.length - 1);
+        [cands[i], cands[j]] = [cands[j], cands[i]];
+        cands[i].takeoff('leave');
+      }
+      if (n) this.nextSpawn = Math.min(this.nextSpawn, t + U.rand(0.6, 1.5));
+    }
     // 理由なき一斉飛翔
     if (t > this.nextPanic) {
       this.nextPanic = t + U.rand(45, 100);
@@ -1056,6 +1089,7 @@ const UI = {
     this.g = g;
     this.countEl = document.getElementById('count');
     this.zkEl = document.getElementById('zk-count');
+    this.zkOnlyEl = document.getElementById('zk-only');
     this.label = document.getElementById('label');
     this.toastEl = document.getElementById('toast');
     this.hint = document.getElementById('hint');
@@ -1130,6 +1164,8 @@ const UI = {
     document.getElementById('zk-open').addEventListener('click', () => { this.renderZukan(); panel.hidden = false; });
     document.getElementById('zk-close').addEventListener('click', () => { panel.hidden = true; });
     panel.addEventListener('click', (e) => { if (e.target === panel) panel.hidden = true; });
+    document.getElementById('zk-all').addEventListener('click', () => { g.setOnly(null); this.renderZukan(); });
+    document.getElementById('zk-none').addEventListener('click', () => { g.setOnly(new Set()); this.renderZukan(); });
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') panel.hidden = true; });
     this.bindUiOff();
   },
@@ -1206,6 +1242,7 @@ const UI = {
     this.countEl.textContent = n;
     const seen = VARIANTS.filter((v) => g.seen[v.id]).length;
     this.zkEl.textContent = `${seen}/${VARIANTS.length}`;
+    this.zkOnlyEl.hidden = !g.filtering;
   },
   placeLabel(b) {
     if (!b || b.left) { this.label.hidden = true; return; }
@@ -1232,11 +1269,14 @@ const UI = {
   renderZukan() {
     const grid = document.getElementById('zk-grid');
     const g = this.g;
+    const scroll = grid.scrollTop;
     grid.textContent = '';
+    this.renderOnly();
     VARIANTS.forEach((v, i) => {
       const seen = g.seen[v.id] || 0;
+      const called = seen && g.only ? g.only.has(v.id) : !!seen;
       const card = document.createElement('div');
-      card.className = 'card' + (seen ? '' : ' unseen');
+      card.className = 'card' + (seen ? '' : ' unseen') + (seen && g.filtering && !called ? ' off' : '');
       const cv = document.createElement('canvas');
       cv.width = SPR.W; cv.height = SPR.H;
       const cx = cv.getContext('2d');
@@ -1260,8 +1300,42 @@ const UI = {
       ct.className = 'ct';
       ct.textContent = seen ? `観察 ${seen}羽` : '';
       card.append(no, cv, nm, ds, ct);
+      if (seen) {
+        const call = document.createElement('button');
+        call.className = 'call';
+        call.setAttribute('aria-pressed', String(called));
+        call.setAttribute('aria-label', `${v.name}を呼ぶ`);
+        call.innerHTML = '<i aria-hidden="true"></i>呼ぶ';
+        call.addEventListener('click', () => {
+          // しぼっていないときは「見つけたぜんぶを呼んでいる」状態から外す
+          const set = new Set(g.only || VARIANTS.filter((o) => g.seen[o.id]).map((o) => o.id));
+          if (set.has(v.id)) set.delete(v.id); else set.add(v.id);
+          g.setOnly(set);
+          this.renderZukan();
+          const again = grid.querySelector(`[aria-label="${v.name}を呼ぶ"]`);
+          if (again) again.focus();
+        });
+        card.append(call);
+      }
       grid.append(card);
     });
+    grid.scrollTop = scroll;
+  },
+  // 図鑑の上の「呼ぶ鳩」の札
+  renderOnly() {
+    const g = this.g;
+    const el = document.getElementById('zk-state');
+    const seenN = VARIANTS.filter((v) => g.seen[v.id]).length;
+    if (g.filtering) {
+      const n = VARIANTS.filter((v) => g.only.has(v.id) && g.seen[v.id]).length;
+      el.textContent = `${seenN}種のうち${n}種だけを呼んでいます。ほかの鳩は少しずつ帰っていきます`;
+    } else if (g.only) {
+      el.textContent = '呼ぶ鳩を選んでください（選ぶまでは全種が来ます）';
+    } else {
+      el.textContent = 'ぜんぶの羽色が来ます。「呼ぶ」を外すと、来る鳩をしぼれます';
+    }
+    document.getElementById('zk-all').disabled = !g.only;
+    document.getElementById('zk-none').disabled = seenN === 0 || (!!g.only && !g.filtering);
   },
 };
 
