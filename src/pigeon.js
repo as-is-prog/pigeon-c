@@ -224,9 +224,10 @@ class Pigeon {
     const f = { mode, t: 0, flap: U.rand(0, 1), speed: this.flySpeed * (opt.quick ? 0.75 : 1), tz: 0, alt: 40 };
     const W = g.W, H = g.H;
     if (mode === 'leave') {
+      // 画面の外まで止まらずに飛んでいく。目標は画面よりずっと先に置く
       const side = U.randi(0, 2);
-      f.tx = side === 0 ? -50 : side === 1 ? W + 50 : U.rand(0, W);
-      f.ty = side === 2 ? this.y - 60 : this.y + U.rand(-30, 30);
+      f.tx = side === 0 ? -400 : side === 1 ? W + 400 : this.x + U.rand(-120, 120);
+      f.ty = side === 2 ? -400 : this.y + U.rand(-60, 60);
       f.alt = U.rand(50, 90);
       f.out = true;
     } else if (mode === 'perch') {
@@ -281,7 +282,7 @@ class Pigeon {
     const sp = f.speed * (f.mode === 'flock' ? 1.15 : 1) * Math.min(1, 0.35 + f.t * 1.5);
     // 慣性付きの操舵
     const k = Math.min(1, dt * (f.mode === 'flock' ? 2.2 : 3.5));
-    const want = d > 0.01 ? Math.min(sp, d * 4) : 0;
+    const want = f.out ? sp : d > 0.01 ? Math.min(sp, d * 4) : 0;
     this.vx += ((d ? (dx / d) * want : 0) - this.vx) * k;
     this.vy += ((d ? (dy / d) * want : 0) - this.vy) * k;
     this.x += this.vx * dt;
@@ -298,6 +299,7 @@ class Pigeon {
       if (d < approach) wantZ = U.lerp(f.tz, f.alt, Math.pow(d / approach, 1.3));
     }
     if (f.mode === 'flock') wantZ += (f.off[2] || 0) + Math.sin(g.t * 2 + this.id) * 3;
+    if (f.out) wantZ += f.t * 12; // 帰るときは上りつづける
     const climb = f.t < 0.6 ? 70 : 45;
     const dz = U.clamp(wantZ - this.z, -climb * dt, climb * dt);
     this.z += dz;
@@ -308,11 +310,13 @@ class Pigeon {
     let frame = cyc[Math.floor(f.flap) % 6];
     if (vz < -8 && f.t > 1 && d > 22 && Math.sin(f.flap * 0.35 + this.id) > -0.2) frame = 4; // 滑空
     if (f.mode === 'flock' && Math.sin(g.t * 1.3 + this.id) > 0.55) frame = 4;
-    if (landing && d < 9 && this.z - f.tz < 12) frame = Math.floor(f.flap * 1.2) % 2 ? 5 : 1;
+    // 着地の構え: いちど入ったら戻らない。体を起こしたまま翼をゆっくり上げ下げ
+    if (landing && d < 9 && this.z - f.tz < 12) f.flare = true;
+    if (f.flare) frame = Math.floor(f.flap * 0.6) % 2 ? 6 : 5;
     this.pose = `fly:${frame}`;
     if (f.out) {
       if (this.x < -40 || this.x > g.W + 40 || this.y - this.z < -40 || this.y > g.H + 60) this.left = true;
-      if (f.t > 12) this.left = true;
+      if (f.t > 20) this.left = true; // 念のため
       return;
     }
     if (landing && d < 1.5 && Math.abs(this.z - f.tz) < 1.5) {
@@ -544,7 +548,7 @@ class Pigeon {
         const T = 0.4;
         const t = this.st / T;
         this.z = Math.sin(Math.min(1, t) * Math.PI) * 5;
-        this.pose = `fly:${[1, 0, 1, 2][Math.floor(t * 8) % 4]}`;
+        this.pose = `fly:${Math.floor(t * 5) % 2 ? 6 : 5}`;
         if (this.target) { this.x += this.target.x * dt / T; this.y += this.target.y * dt / T; }
         if (!g.scene.walkable(this.x, this.y)) { const s = g.groundNear(this.x, this.y, 10); this.x = s.x; this.y = s.y; }
         if (t >= 1) {

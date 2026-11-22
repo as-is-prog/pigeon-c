@@ -74,13 +74,14 @@ function pigeonPose(key, kiji) {
       p.puff = 0.6 * a;
       p.tailDrop = 0.25;
       break;
-    case 'fly': // a: 羽ばたきフレーム 0..3, 4=滑空, 5=着地姿勢
-      p.legsVisible = a === 5;
+    case 'fly': // a: 羽ばたきフレーム 0..3, 4=滑空, 5・6=着地姿勢（翼を上げる／打ち下ろす）
+      p.legsVisible = a >= 5;
       p.fly = a;
-      if (a === 5) {
+      if (a >= 5) {
         p.ang = -0.75;
-        p.B = [14, 15];
-        p.H = [18.6, 6.4];
+        // 足先が接地点にそろう高さ（着地の瞬間に段差が出ないように）
+        p.B = [14, 17.8];
+        p.H = [18.6, 9.2];
         p.tailDrop = 0.9;
         p.tailW = 3.2;
         p.legs = 3;
@@ -110,7 +111,9 @@ function flyWing(frame) {
     case 2: return [[19.5, 15], [19, 18], [12, 22], [10, 18], [12.5, 15.5]];
     case 3: return [[19, 15], [18.5, 21], [14, 29], [11, 22], [12.5, 16]];
     case 4: return [[19.5, 13.5], [19, 9.5], [8.5, 8], [9.5, 12], [12.5, 14]];
-    case 5: return [[17, 13], [21, 5], [22, 0], [15, 4], [13, 12]];
+    // 着地: 体を起こしたまま、頭にかからないよう背中側で翼を上げ下げする
+    case 5: return [[16.5, 14.3], [14.5, 6.3], [7.5, 3.3], [8.5, 9.8], [12, 15.8]];
+    case 6: return [[16.5, 14.3], [15, 19.8], [7.5, 24.5], [7.5, 17.8], [12, 15.3]];
   }
   return null;
 }
@@ -170,7 +173,7 @@ function renderPigeon(variant, marks, key) {
   const primPoly = [primA, primTip, primB];
 
   const flyPoly = P.fly !== null ? flyWing(P.fly) : null;
-  const farPoly = flyPoly && (P.fly <= 1 || P.fly === 4 || P.fly === 5) ? flyPoly.map(([x, y]) => [x + 2.2, y + 1.3]) : null;
+  const farPoly = flyPoly && (P.fly <= 1 || P.fly >= 4) ? flyPoly.map(([x, y]) => [x + 2.2, y + 1.3]) : null;
 
   // 各ピクセルの領域判定
   const reg = new Array(W * H).fill(null);
@@ -213,7 +216,7 @@ function renderPigeon(variant, marks, key) {
         continue;
       }
       // 折りたたんだ翼・風切
-      if (!flyPoly || P.fly === 5) {
+      if (!flyPoly) {
         const [wu, wv] = toLocal(px, py, wingC[0], wingC[1]);
         if ((wu * wu) / (wrx * wrx) + (wv * wv) / (wry * wry) < 1 && !flyPoly) {
           reg[i] = 'wing';
@@ -255,7 +258,7 @@ function renderPigeon(variant, marks, key) {
   if (P.legsVisible) {
     const legBaseY = Math.round(P.B[1] + P.ry * 0.75);
     const lx = Math.round(P.B[0] + 0.5);
-    const footY = P.fly === 5 ? legBaseY + 3 : SPR.AY - 1;
+    const footY = P.fly >= 5 ? legBaseY + 3 : SPR.AY - 1;
     const offs = P.legs === 1 ? [-1, 1] : P.legs === 2 ? [1, -1] : P.legs === 3 ? [1, 2] : [0, 1];
     offs.forEach((o, k) => {
       const x0 = lx + o;
